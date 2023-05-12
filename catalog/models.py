@@ -1,6 +1,9 @@
 from django.db import models
+from django.contrib import admin
 from django.urls import reverse # Used to generate URLs by reversing the URL patterns
 import uuid # Required for unique book instances
+from django.contrib.auth.models import User
+from datetime import date
 
 
 # Create your models here.
@@ -40,6 +43,12 @@ class Book(models.Model):
     genre = models.ManyToManyField(Genre, help_text='Select a genre for this book')
     language = models.ForeignKey('Language', on_delete=models.SET_NULL, null=True)
 
+    def display_genre(self):
+        """Create a string for the Genre. This is required to display genre in Admin."""
+        return ', '.join(genre.name for genre in self.genre.all()[:3])
+
+    display_genre.short_description = 'Genre'
+
     def __str__(self):
         """String for representing the Model object."""
         return self.title
@@ -55,6 +64,8 @@ class BookInstance(models.Model):
     book = models.ForeignKey('Book', on_delete=models.RESTRICT, null=True)
     imprint = models.CharField(max_length=200)
     due_back = models.DateField(null=True, blank=True)
+    borrower = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    
 
     LOAN_STATUS = (
         ('m', 'Maintenance'),
@@ -74,10 +85,17 @@ class BookInstance(models.Model):
     class Meta:
         ordering = ['due_back']
 
+
+        permissions = (("can_mark_returned", "Set book as returned"),)
+
     def __str__(self):
         """String for representing the Model object."""
         return f'{self.id} ({self.book.title})' 
     
+    @property
+    def is_overdue(self):
+        """Determines if the book is overdue based on due date and current date."""
+        return bool(self.due_back and date.today() > self.due_back)
 
 class Author(models.Model):
     """Model representing an author."""
@@ -96,3 +114,42 @@ class Author(models.Model):
     def __str__(self):
         """String for representing the Model object."""
         return f'{self.last_name}, {self.first_name}'    
+    
+class BookInline(admin.TabularInline):
+    model = Book
+    
+    extra = 0
+
+class AuthorAdmin(admin.ModelAdmin):
+    list_display = ('last_name', 'first_name', 'date_of_birth', 'date_of_death')
+
+    fields = ['first_name', 'last_name', ('date_of_birth', 'date_of_death')]
+    
+    inlines = [BookInline]
+
+class BooksInstanceInline(admin.TabularInline):
+    model = BookInstance
+
+    extra = 0
+
+# Register the Admin classes for Book using the decorator
+@admin.register(Book)
+class BookAdmin(admin.ModelAdmin):
+    list_display = ('title', 'author', 'display_genre')
+
+    inlines = [BooksInstanceInline]
+
+# Register the Admin classes for BookInstance using the decorator
+@admin.register(BookInstance)
+class BookInstanceAdmin(admin.ModelAdmin):
+    list_display = ('book', 'status', 'borrower', 'due_back', 'id')
+    list_filter = ('status', 'due_back')
+
+    fieldsets = (
+        (None, {
+            'fields': ('book', 'imprint', 'id')
+        }),
+        ('Availability', {
+            'fields': ('status', 'due_back', 'borrower')
+        }),
+    )
